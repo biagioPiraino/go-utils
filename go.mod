@@ -1,3 +1,3 @@
-module github.com/biagioPiraino/go_utils
+module github.com/biagioPiraino/go-utils
 
 go 1.24.10
