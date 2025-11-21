@@ -1,12 +1,15 @@
 package goutils
 
+// TODO: review tests and understand how to setup test and run
+// TODO: publish v0.1.0 on public
+
 import (
+	"fmt"
 	"log"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 )
 
@@ -31,7 +34,7 @@ var severityName = map[Severity]string{
 	Trace:     "TRACE",
 }
 
-func (severity Severity) Severity() string {
+func (severity Severity) ToString() string {
 	return severityName[severity]
 }
 
@@ -61,104 +64,97 @@ type LogEvent struct {
 }
 
 type Blogger struct {
-	// includes severities 0-2
-	errorsFilepath string
-	// includes severities 3-5
-	logsFilepath string
+	// Leave file open to prevent overhead by keep open it
+	// everytime a log is made.
+
+	// To ensure resources are correclty closed on panic
+	// remember to defer their closure during recovery
+	errorsFile *os.File
+	logsFile   *os.File
+
+	errLogger *log.Logger // includes severities 0-2
+	stdLogger *log.Logger // includes severities 3-5
 }
 
-var (
-	Logger *Blogger
-	once   sync.Once
-)
+func NewLogger(logDirectory string, logFilename string, errorFilename string) (*Blogger, error) {
+	if errorFilename == "" {
+		errorFilename = logFilename
+	}
 
-// initialising logger by passing absolute path value
-func InitialiseLogger(logDirectory string, logFilename string, errorFilename string) {
-	once.Do(func() {
-		// same logging file in case error not specified
-		if errorFilename == "" {
-			errorFilename = logFilename
-		}
+	logsFile, errorsFile, err := openOutputFiles(logDirectory, logFilename, errorFilename)
+	if err != nil {
+		return nil, err
+	}
 
-		logsFilepath, errorsFilepath, err := createOutputFiles(logDirectory, logFilename, errorFilename)
-		if err != nil {
-			log.Fatalf(Critical.Severity()+": unable to initialise logger, exiting.\nError details: %v", err)
-		}
+	logger := Blogger{
+		logsFile:   logsFile,
+		errorsFile: errorsFile,
+		// new logger can be direclty initialised and assigned to a struct
+		stdLogger: log.New(logsFile, "", 0),
+		errLogger: log.New(errorsFile, "", 0),
+	}
 
-		Logger = &Blogger{
-			errorsFilepath: errorsFilepath,
-			logsFilepath:   logsFilepath,
-		}
+	logger.Log(
+		Trace,
+		LogEvent{ProcessType: OsProcess,
+			ProcessId: strconv.Itoa(os.Getpid()),
+			Event:     "Logger initialised successfully"})
 
-		LogRequest(
-			Trace,
-			LogEvent{
-				ProcessType: OsProcess,
-				ProcessId:   strconv.Itoa(os.Getpid()),
-				Event:       "Logger initialised successfully",
-			})
-	})
+	return &logger, nil
 }
 
-func LogRequest(severity Severity, process LogEvent) error {
-	var file *os.File
-	var err error
+func (b *Blogger) Log(severity Severity, process LogEvent) {
+	msg := fmt.Sprintf("%s,%s,%s,%s,%s",
+		severityName[severity], nowUTC(), processTypeName[process.ProcessType], process.ProcessId, process.Event)
 
 	switch severity {
-	case Emergency:
-	case Alert:
-	case Critical:
-		file, err = os.OpenFile(Logger.errorsFilepath, os.O_RDWR|os.O_APPEND, 0644)
-		if err != nil {
-			return err
-		}
+	case Emergency, Alert, Critical:
+		b.errLogger.Println(msg)
 	default:
-		file, err = os.OpenFile(Logger.logsFilepath, os.O_RDWR|os.O_APPEND, 0644)
-		if err != nil {
-			return err
+		b.stdLogger.Println(msg)
+	}
+}
+
+func (b *Blogger) Close() {
+	if b.errorsFile != nil {
+		if err := b.errorsFile.Close(); err != nil {
+			// log auto redirect to std err
+			log.Printf("error while closing error logs file: %v")
 		}
 	}
 
-	defer closeFile(file)
-	log.SetFlags(0)
-	log.SetOutput(file)
-	log.Printf("%s,%s,%s,%s,%s",
-		severityName[severity], nowUTC(), processTypeName[process.ProcessType], process.ProcessId, process.Event)
-	file.Sync()
-	return nil
-}
-
-func closeFile(file *os.File) {
-	err := file.Close()
-	if err != nil {
-		log.Printf("An error occurred while closing the logging file %s\nError details: %v", file.Name(), err)
+	if b.logsFile != nil {
+		if err := b.logsFile.Close(); err != nil {
+			// log auto redirect to std err
+			log.Printf("error while closing logs file: %v")
+		}
 	}
 }
 
-func createOutputFiles(logDirectory string, logFilename string, errorFilename string) (string, string, error) {
+// private functions
+func openOutputFiles(logDirectory string, logFilename string, errorFilename string) (*os.File, *os.File, error) {
 	logsFileTimeExt := strings.Join([]string{todayUTC(), "-", logFilename, ".csv"}, "")
 	errorsFileTimeExt := strings.Join([]string{todayUTC(), "-", errorFilename, ".csv"}, "")
 
 	// creating directory where only app can write and external user can only read and traverse
 	if err := os.MkdirAll(logDirectory, 0755); err != nil {
-		return "", "", err
+		return nil, nil, err
 	}
 
 	// create files, only app the write and read, all the others can read only
 	logsFilepath := filepath.Join(logDirectory, logsFileTimeExt)
-	logFile, err := os.OpenFile(logsFilepath, os.O_CREATE, 0644)
+	logFile, err := os.OpenFile(logsFilepath, os.O_CREATE|os.O_RDWR|os.O_APPEND, 0644)
 	if err != nil {
-		return "", "", err
+		return nil, nil, err
 	}
-	defer closeFile(logFile)
 
 	errorsFilepath := filepath.Join(logDirectory, errorsFileTimeExt)
-	errorFile, err := os.OpenFile(errorsFilepath, os.O_CREATE, 0644)
+	errorFile, err := os.OpenFile(errorsFilepath, os.O_CREATE|os.O_RDWR|os.O_APPEND, 0644)
 	if err != nil {
-		return "", "", err
+		logFile.Close()
+		return nil, nil, err
 	}
-	defer closeFile(errorFile)
-	return logsFilepath, errorsFilepath, nil
+	return logFile, errorFile, nil
 }
 
 func todayUTC() string {
