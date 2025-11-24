@@ -1,8 +1,5 @@
 package goutils
 
-// TODO: review tests and understand how to setup test and run
-// TODO: publish v0.1.0 on public
-
 import (
 	"fmt"
 	"log"
@@ -67,10 +64,10 @@ type Blogger struct {
 	// Leave file open to prevent overhead by keep open it
 	// everytime a log is made.
 
-	// To ensure resources are correclty closed on panic
+	// To ensure resources are correctly closed on panic
 	// remember to defer their closure during recovery
-	errorsFile *os.File
-	logsFile   *os.File
+	ErrorsFile *os.File
+	LogsFile   *os.File
 
 	errLogger *log.Logger // includes severities 0-2
 	stdLogger *log.Logger // includes severities 3-5
@@ -87,9 +84,9 @@ func NewLogger(logDirectory string, logFilename string, errorFilename string) (*
 	}
 
 	logger := Blogger{
-		logsFile:   logsFile,
-		errorsFile: errorsFile,
-		// new logger can be direclty initialised and assigned to a struct
+		LogsFile:   logsFile,
+		ErrorsFile: errorsFile,
+		// new logger can be directly initialised and assigned to a struct
 		stdLogger: log.New(logsFile, "", 0),
 		errLogger: log.New(errorsFile, "", 0),
 	}
@@ -116,17 +113,17 @@ func (b *Blogger) Log(severity Severity, process LogEvent) {
 }
 
 func (b *Blogger) Close() {
-	if b.errorsFile != nil {
-		if err := b.errorsFile.Close(); err != nil {
+	if b.ErrorsFile != nil {
+		if err := b.ErrorsFile.Close(); err != nil {
 			// log auto redirect to std err
-			log.Printf("error while closing error logs file: %v")
+			log.Printf("error while closing error logs file: %v\n", err)
 		}
 	}
 
-	if b.logsFile != nil {
-		if err := b.logsFile.Close(); err != nil {
+	if b.LogsFile != nil {
+		if err := b.LogsFile.Close(); err != nil {
 			// log auto redirect to std err
-			log.Printf("error while closing logs file: %v")
+			log.Printf("error while closing logs file: %v\n", err)
 		}
 	}
 }
@@ -151,7 +148,9 @@ func openOutputFiles(logDirectory string, logFilename string, errorFilename stri
 	errorsFilepath := filepath.Join(logDirectory, errorsFileTimeExt)
 	errorFile, err := os.OpenFile(errorsFilepath, os.O_CREATE|os.O_RDWR|os.O_APPEND, 0644)
 	if err != nil {
-		logFile.Close()
+		if err := logFile.Close(); err != nil {
+			return nil, nil, err
+		}
 		return nil, nil, err
 	}
 	return logFile, errorFile, nil
