@@ -19,7 +19,10 @@ const (
 
 // Helper to clean up artifacts after tests
 func cleanup(dir string) {
-	os.RemoveAll(dir)
+	if err := os.RemoveAll(dir); err != nil {
+		err = fmt.Errorf("error cleaning up test resources %w", err)
+		fmt.Println(err)
+	}
 }
 
 // Helper to generate expected filenames based on the logic in logger.go
@@ -62,7 +65,7 @@ func TestLoggerIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
-	defer cleanup(tempDir)
+	t.Cleanup(func() { cleanup(tempDir) })
 
 	// 2. Initialize Logger
 	logger, err := goutils.NewLogger(tempDir, logsName, errorsName)
@@ -126,7 +129,7 @@ func TestLogFormat(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
-	defer cleanup(tempDir)
+	t.Cleanup(func() { cleanup(tempDir) })
 
 	// 2. Initialize Logger
 	logger, err := goutils.NewLogger(tempDir, logsName, errorsName)
@@ -193,7 +196,7 @@ func TestConcurrency(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
-	defer cleanup(tempDir)
+	t.Cleanup(func() { cleanup(tempDir) })
 
 	logger, err := goutils.NewLogger(tempDir, logsName, errorsName)
 	if err != nil {
